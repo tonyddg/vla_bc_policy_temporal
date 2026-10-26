@@ -20,7 +20,7 @@ def get_trainer(
     optuna_trial: Optional[optuna.Trial] = None
 ):
     from pathlib import Path
-    import vla_bc_policy
+    import vla_bc_policy_temporal
 
     from lightning.pytorch.callbacks import (ModelCheckpoint, EarlyStopping, RichProgressBar, LearningRateMonitor)
     from lightning.pytorch.loggers import (TensorBoardLogger)
@@ -31,7 +31,7 @@ def get_trainer(
 
     monitor_metrics = f"val_{key_metrics_name}"
 
-    BC_POLICY_CKPT_DIR = os.environ.get("BC_POLICY_CKPT_DIR", (Path(vla_bc_policy.__file__).parent / "../../output").as_posix())
+    BC_POLICY_CKPT_DIR = os.environ.get("BC_POLICY_TEMPORAL_CKPT_DIR", (Path(vla_bc_policy_temporal.__file__).parent / "../../output").as_posix())
     logger = TensorBoardLogger(
         BC_POLICY_CKPT_DIR, 
         name

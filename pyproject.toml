@@ -1,5 +1,5 @@
 [project]
-name = "vla-bc-policy"
+name = "vla-bc-policy-temporal"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-vla-bc-policy = "vla_bc_policy:main"
+vla-bc-policy-temporal = "vla_bc_policy_temporal:main"
 
 [tool.uv.sources]
 lerobot = { git = "https://github.com/huggingface/lerobot", rev = "0cf864870cf29f4738d3ade893e6fd13fbd7cdb5" }

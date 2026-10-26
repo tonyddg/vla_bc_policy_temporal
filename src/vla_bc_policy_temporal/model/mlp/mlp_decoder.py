@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from vla_bc_policy.model.utility import NormType, ActivateFnType, ActivateFnDict
+from vla_bc_policy_temporal.model.utility import NormType, ActivateFnType, ActivateFnDict
 
 class MlpDecoder(nn.Module):
     def __init__(
@@ -85,10 +85,9 @@ class MlpDecoder(nn.Module):
 
             last_mlp_feats = mlp_feats
 
-            if is_init_weight:
-                self.init_weight()
-
         self.decoder = nn.Sequential(*backbone_list)
+        if is_init_weight:
+            self.init_weight()
 
     def forward(self, X: torch.Tensor):
         return self.decoder(X)

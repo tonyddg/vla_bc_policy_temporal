@@ -92,7 +92,7 @@ class ResNetEncoder(nn.Module):
         super().__init__()
 
         head = nn.Sequential(
-            nn.Conv2d(in_channels, 64, 7, 2, 3),
+            nn.Conv2d(in_channels, feat_channels[0], 7, 2, 3),
             nn.BatchNorm2d(64), nn.ReLU(True),
             nn.MaxPool2d(3, 2, 1)
         )

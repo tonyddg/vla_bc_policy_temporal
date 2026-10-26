@@ -1,9 +1,15 @@
-from typing import Literal, Optional
+import random
+from typing import Literal, Mapping, Optional
 import numpy as np
 import torch
 
+EP_KEY = "episode_index" # 兼容旧数据集使用 episode_idx
+FRAME_KEY = "frame_index" # 兼容旧数据集使用 frame_idx
+
 ACTION_SAMPLE_KEY = "policy_action"
+TRAJ_SAMPLE_KEY = "pi0_actions_ref"
 VECTION_OBS_KEY = "vector"
+IMAGE_OBS_KEY = "image"
 
 ROT_TYPE = Literal["axis_angle", "rot_6d", "quat", "rpy_euler"]
 STATE_ROT_LENGTH_DICT = {
@@ -107,39 +113,96 @@ def depth_to_pointcloud(
     return points_world
 
 def get_random_pi0_lerobot_batch(
-    output_dim: Optional[int],
-    vec_obs_dim: int,
-    img_obs_dim: dict[str, int],
-    b: int,
+ 
+    vec_obs_dim: Mapping[str, int], 
+    img_obs_dim: Mapping[str, int],
+
+    action_horizon: int,
+    traject_horizon: int,
+    observation_horizon: int,
+    
+    batch_size: int,
+
+    output_dim: Optional[int] = None, 
+    traject_dim: Optional[int] = None,
 
     image_size: tuple[int, int] = (128, 128),
     device: Optional[torch.device] = None,
     dtype: torch.dtype = torch.float32,
 ):
     """
-    根据 get_pi0_lerobot_dataspec 的输出结果，随机生成一个 mock batch
+    随机生成一个 mock batch
     """
 
     h, w = image_size
 
     obs = {}
 
-    obs[VECTION_OBS_KEY] = torch.randn(
-        b, vec_obs_dim,
-        device = device, dtype = dtype,
+    obs[VECTION_OBS_KEY] = {
+        key: torch.randn(
+        (batch_size, observation_horizon, vec_obs_dim[key]), device = device, dtype = dtype,
     )
+        for key in vec_obs_dim
+    }
 
-    for camera_name, in_channels in img_obs_dim.items():
-        obs[camera_name] = torch.randn(
-            b, in_channels, h, w,
-            device = device, dtype = dtype,
-        )
+    obs[IMAGE_OBS_KEY] = {
+        key: torch.randn(
+        (batch_size, observation_horizon, img_obs_dim[key], h, w), device = device, dtype = dtype,
+    )
+        for key in img_obs_dim
+    }
 
     if output_dim is not None:
         action = torch.randn(
-            b, output_dim, device = device, dtype = dtype,
+            (batch_size, action_horizon, output_dim), device = device, dtype = dtype,
         )
     else:
         action = None
 
-    return obs, action
+    if traject_dim is not None:
+        traject = torch.randn(
+            (batch_size, traject_horizon, traject_dim), device = device, dtype = dtype,
+        )
+    else:
+        traject = None
+
+    masks = {
+        "obs_valid_mask": torch.ones(batch_size, observation_horizon, dtype=torch.bool, device=device),
+        "action_valid_mask": torch.ones(batch_size, action_horizon, dtype=torch.bool, device=device),
+        "traject_valid_mask": torch.ones(batch_size, traject_horizon, dtype=torch.bool, device=device),
+    }
+    return obs, action, traject, masks
+
+def random_split_indices(
+    A: int,
+    B: int,
+    seed: Optional[int] = None,
+) -> tuple[list[int], list[int]]:
+    """
+    从 [0, 1, ..., A-1] 中随机选择 B 个不重复的数。
+
+    返回:
+        selected: 随机选中的 B 个数，可作为测试集 indices
+        remaining: 剩余的 A-B 个数，可作为训练集 indices
+
+    参数:
+        A: 总数量
+        B: 要随机选择的数量
+        seed: 随机种子，用于复现实验
+    """
+
+    if A < 0:
+        raise ValueError("A must be non-negative")
+
+    if B < 0 or B > A:
+        raise ValueError("B must satisfy 0 <= B <= A")
+
+    rng = random.Random(seed)
+
+    all_indices = list(range(A))
+
+    selected = rng.sample(all_indices, B)
+    selected_set = set(selected)
+    remaining = [idx for idx in all_indices if idx not in selected_set]
+    
+    return selected, remaining

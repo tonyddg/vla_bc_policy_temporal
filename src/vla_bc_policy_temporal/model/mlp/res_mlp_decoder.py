@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from vla_bc_policy.model.utility import NormType, ActivateFnType, ActivateFnDict
+from vla_bc_policy_temporal.model.utility import NormType, ActivateFnType, ActivateFnDict
 
 class ResMlpBlock(nn.Module):
     def __init__(
@@ -67,7 +67,10 @@ class ResMlpDecoder(nn.Module):
         else:
             self.output_proj = nn.Identity()
             if hidden_dim != num_out_feats:
-                warn(f"hidden_dim: {hidden_dim} is not equal num_out_feats: {num_out_feats} in no is_output_proj mode and real out feats will set to hidden_dim")
+                raise ValueError(
+                    "ResMlpDecoder with is_output_proj=False requires "
+                    f"hidden_dim == num_out_feats (got {hidden_dim} != {num_out_feats})"
+                )
 
         self.blocks = nn.Sequential(
             *[

@@ -13,6 +13,7 @@ dependencies = [
     "tyro>=0.9.5",
     "lightning>=2.6.4",
     "setuptools<82",
+    "timm>=1.0.30",
 ]
 
 [project.scripts]

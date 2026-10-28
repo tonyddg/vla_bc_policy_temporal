@@ -23,26 +23,47 @@ class CameraConfig(ABC):
     def build_frame(
         self,
         sample: Mapping[str, torch.Tensor],
+        is_batched: bool = False
     ) -> torch.Tensor:
         '''
         输入单帧 H, W, C / C, H, W, 输出 C, H, W
+        Batch 时输入 B, H, W, C / B, C, H, W 输出 B, C, H, W
         '''
         raise NotImplementedError()
 
-    def standard_frame(self, frame: torch.Tensor):
+    def standard_frame(
+        self, 
+        frame: torch.Tensor,
+        is_batched: bool = False
+    ):
         # 图像最终处理, 将图像转为 C, H, W, 并且将像素置 0
-        if frame.ndim == 2:
-            # A single-channel depth image is unambiguous in either layout.
-            frame = frame.unsqueeze(-1) if self.layout == "HWC" else frame.unsqueeze(0)
-        if frame.ndim != 3:
-            raise ValueError(f"Image frame must have 2 or 3 dimensions, got {tuple(frame.shape)}")
+        if is_batched:
+            if frame.ndim == 3:
+                # A single-channel depth image is unambiguous in either layout.
+                frame = frame.unsqueeze(-1) if self.layout == "HWC" else frame.unsqueeze(1)
+            if frame.ndim != 4:
+                raise ValueError(f"Image frame must have 3 or 4 dimensions, got {tuple(frame.shape)}")
 
-        if self.layout == "HWC":
-            if frame.shape[-1] != self.image_channel:
-                raise ValueError(f"Expected HWC depth with C={self.image_channel}, got {tuple(frame.shape)}")
-            frame = frame.permute(2, 0, 1)
-        elif frame.shape[0] != self.image_channel:
-            raise ValueError(f"Expected CHW depth with C={self.image_channel}, got {tuple(frame.shape)}")
+            if self.layout == "HWC":
+                if frame.shape[-1] != self.image_channel:
+                    raise ValueError(f"Expected HWC depth with C={self.image_channel}, got {tuple(frame.shape)}")
+                frame = frame.permute(0, 3, 1, 2)
+            elif frame.shape[1] != self.image_channel:
+                raise ValueError(f"Expected CHW depth with C={self.image_channel}, got {tuple(frame.shape)}")
+
+        else:
+            if frame.ndim == 2:
+                # A single-channel depth image is unambiguous in either layout.
+                frame = frame.unsqueeze(-1) if self.layout == "HWC" else frame.unsqueeze(0)
+            if frame.ndim != 3:
+                raise ValueError(f"Image frame must have 2 or 3 dimensions, got {tuple(frame.shape)}")
+
+            if self.layout == "HWC":
+                if frame.shape[-1] != self.image_channel:
+                    raise ValueError(f"Expected HWC depth with C={self.image_channel}, got {tuple(frame.shape)}")
+                frame = frame.permute(2, 0, 1)
+            elif frame.shape[0] != self.image_channel:
+                raise ValueError(f"Expected CHW depth with C={self.image_channel}, got {tuple(frame.shape)}")
 
         # Invalid (including zero) depth should not become a strong near-field
         # activation. Use zero AFTER applying the nonlinear conversion.
@@ -70,7 +91,11 @@ class DepthTanhCameraConfig(CameraConfig):
         if not (self.depth_scale > 0 and self.z_far > self.z_near):
             raise ValueError("Require depth_scale > 0 and z_far > z_near")
 
-    def build_frame(self, sample: Mapping[str, torch.Tensor]):
+    def build_frame(
+        self, 
+        sample: Mapping[str, torch.Tensor],
+        is_batched: bool = False
+    ):
         if self.depth_key not in sample:
             raise KeyError(f"Depth camera input {self.depth_key!r} missing")
 
@@ -80,7 +105,7 @@ class DepthTanhCameraConfig(CameraConfig):
         frame = 1 - torch.tanh((frame - self.z_near) / (self.z_far - self.z_near))
         frame[frame < 0] = 0
 
-        return self.standard_frame(frame)
+        return self.standard_frame(frame, is_batched)
 
     def get_image_channels(self) -> int:
         return 1

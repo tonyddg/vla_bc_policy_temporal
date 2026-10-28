@@ -2,7 +2,7 @@ from dataclasses import dataclass, asdict
 import json
 import os
 from pathlib import Path
-from typing import Mapping, Optional, Sequence, Union
+from typing import Literal, Mapping, Optional, Sequence, Union
 
 import torch
 from torch.utils.data import Dataset
@@ -10,31 +10,6 @@ from torch.utils.data import Dataset
 from vla_bc_policy_temporal.dataset.camera_config import CameraConfig, parse_raw_camera_config_dict, to_raw_camera_config_dict
 from vla_bc_policy_temporal.dataset.utility import ACTION_SAMPLE_KEY, TRAJ_SAMPLE_KEY, VECTION_OBS_KEY, IMAGE_OBS_KEY, EP_KEY, FRAME_KEY
 from vla_bc_policy_temporal.dataset.observation_builder import ObservationBuilder
-
-def _stack_obs(obs_steps: list[dict[str, dict[str, torch.Tensor]]], is_img_obs_cur_only: bool = True):
-    seq_len = len(obs_steps)
-    return {
-        IMAGE_OBS_KEY: {
-            key: torch.stack(
-                [
-                    torch.as_tensor(step[IMAGE_OBS_KEY][key])
-                    for idx, step in enumerate(obs_steps) if (not is_img_obs_cur_only or (idx == seq_len - 1))
-                ],
-                dim = 0,
-            )
-            for key in obs_steps[0][IMAGE_OBS_KEY]
-        },
-        VECTION_OBS_KEY: {
-            key: torch.stack(
-                [
-                    torch.as_tensor(step[VECTION_OBS_KEY][key])
-                    for step in obs_steps
-                ],
-                dim = 0,
-            )
-            for key in obs_steps[0][VECTION_OBS_KEY]
-        },
-    }
 
 def get_dataset_dir(repo_id: str, root: Optional[Union[str, Path]] = None) -> Path:
     if root is None:
@@ -140,6 +115,66 @@ class Pi0LeRobotDatasetConfig:
     ):
         return self.action_horizon, (self.traject_horizon[0] + self.traject_horizon[1]), self.observation_horizon 
 
+    def get_padding_obs_sample(
+        self, first_sample: dict[str, torch.Tensor]
+    ):
+        padding_sample = dict(first_sample)
+        if self.padding_obs_zero_keys is not None:
+
+            for key in self.padding_obs_zero_keys:
+                if key not in padding_sample:
+                    raise KeyError(
+                        f"repeat_obs_zero_keys: missing {key!r}"
+                    )
+                padding_sample[key] = torch.zeros_like(padding_sample[key])
+        return padding_sample
+
+    @staticmethod
+    def get_padding_vector(
+        # 参考向量 Tensor[N] / [B, N]
+        refer_vector: torch.Tensor,
+        padding_zero_mask: Optional[list[bool]] = None
+    ):
+        padding_vector = refer_vector.clone()
+
+        if padding_zero_mask is not None:
+            if len(padding_zero_mask) != refer_vector.numel():
+                raise ValueError("padding_zero_mask length must equal trajectory dimension")
+            padding_vector[..., padding_zero_mask] = 0
+
+        return padding_vector
+
+    @staticmethod
+    def stack_temporal_obs(obs_steps: list[dict[str, dict[str, torch.Tensor]]], is_img_obs_cur_only: bool = True, dim: int = 0, device = None):
+        '''
+        将 list 形式的 obs 序列转换为 [T, N] 的张量
+        
+        dim: T 所在维度, 对于 batched obs 为 [B, N], 可取 1 转为 [B, T, N]
+        '''
+        seq_len = len(obs_steps)
+        return {
+            IMAGE_OBS_KEY: {
+                key: torch.stack(
+                    [
+                        torch.as_tensor(step[IMAGE_OBS_KEY][key])
+                        for idx, step in enumerate(obs_steps) if (not is_img_obs_cur_only or (idx == seq_len - 1))
+                    ],
+                    dim = dim,
+                ).to(device = device)
+                for key in obs_steps[0][IMAGE_OBS_KEY]
+            },
+            VECTION_OBS_KEY: {
+                key: torch.stack(
+                    [
+                        torch.as_tensor(step[VECTION_OBS_KEY][key])
+                        for step in obs_steps
+                    ],
+                    dim = dim,
+                ).to(device = device)
+                for key in obs_steps[0][VECTION_OBS_KEY]
+            },
+        }
+
 class Pi0LeRobotDataset(Dataset):
     """
     idx -> 当前时刻 t
@@ -171,7 +206,6 @@ class Pi0LeRobotDataset(Dataset):
 
         self.observation_horizon = config.observation_horizon
         self.action_horizon = config.action_horizon
-        self.is_img_obs_cur_only = config.is_img_obs_cur_only
 
         self.traject_sample_key = config.traject_sample_key
         self.action_sample_key = config.action_sample_key
@@ -199,10 +233,11 @@ class Pi0LeRobotDataset(Dataset):
         self._h5 = None
         self._h5_pid = None
 
-        # 两端动作与观测重复设置
-        self.padding_action_zero_mask = config.padding_action_zero_mask
-        self.padding_traject_zero_mask = config.padding_traject_zero_mask
-        self.padding_obs_zero_keys = config.padding_obs_zero_keys
+        # # 两端动作与观测重复设置
+        # self.padding_action_zero_mask = config.padding_action_zero_mask
+        # self.padding_traject_zero_mask = config.padding_traject_zero_mask
+        # self.padding_obs_zero_keys = config.padding_obs_zero_keys
+        self.dataset_config = config
 
         # 只读取未来动作与 episode 索引，避免解码未来图像
         hf_dataset = self.ds.hf_dataset
@@ -304,11 +339,15 @@ class Pi0LeRobotDataset(Dataset):
         action_mask = torch.arange(self.action_horizon) < n_valid
 
         # 构造重复动作
-        padding_action = valid_actions[-1].clone()
-        if self.padding_action_zero_mask is not None:
-            if len(self.padding_action_zero_mask) != padding_action.numel():
-                raise ValueError("padding_action_zero_mask length must equal action dimension")
-            padding_action[self.padding_action_zero_mask] = 0
+        # padding_action = valid_actions[-1].clone()
+        # if self.padding_action_zero_mask is not None:
+        #     if len(self.padding_action_zero_mask) != padding_action.numel():
+        #         raise ValueError("padding_action_zero_mask length must equal action dimension")
+        #     padding_action[self.padding_action_zero_mask] = 0
+
+        padding_action = self.dataset_config.get_padding_vector(
+            valid_actions[-1], self.dataset_config.padding_action_zero_mask
+        )
 
         # 不足 T2 时重复最后一个有效动作
         actions = torch.stack(
@@ -364,19 +403,26 @@ class Pi0LeRobotDataset(Dataset):
             )
 
         # 构造重复动作
-        padding_tail_action = valid_trajects[-1].clone()
-        padding_head_action = valid_trajects[0].clone()
-        if self.padding_traject_zero_mask is not None:
-            if len(self.padding_traject_zero_mask) != padding_tail_action.numel():
-                raise ValueError("padding_traject_zero_mask length must equal trajectory dimension")
-            padding_tail_action[self.padding_traject_zero_mask] = 0
-            padding_head_action[self.padding_traject_zero_mask] = 0
+        # padding_tail_trajects = valid_trajects[-1].clone()
+        # padding_head_trajects = valid_trajects[0].clone()
+        # if self.padding_traject_zero_mask is not None:
+        #     if len(self.padding_traject_zero_mask) != padding_tail_trajects.numel():
+        #         raise ValueError("padding_traject_zero_mask length must equal trajectory dimension")
+        #     padding_tail_trajects[self.padding_traject_zero_mask] = 0
+        #     padding_head_trajects[self.padding_traject_zero_mask] = 0
+
+        padding_tail_trajects = self.dataset_config.get_padding_vector(
+            valid_trajects[-1], self.dataset_config.padding_traject_zero_mask
+        )
+        padding_head_trajects = self.dataset_config.get_padding_vector(
+            valid_trajects[0], self.dataset_config.padding_traject_zero_mask
+        )
 
         # 不足 T2 时重复最后一个有效动作
         trajects = torch.stack(
-            [padding_head_action] * num_head_invalid + 
+            [padding_head_trajects] * num_head_invalid + 
             valid_trajects
-            + [padding_tail_action] * num_tail_invalid,
+            + [padding_tail_trajects] * num_tail_invalid,
             dim=0,
         )
 
@@ -432,16 +478,19 @@ class Pi0LeRobotDataset(Dataset):
             )
 
             # 构建 padding 观测
-            padding_sample = dict(first_sample)
-            if self.padding_obs_zero_keys is not None:
+            # padding_sample = dict(first_sample)
+            # if self.padding_obs_zero_keys is not None:
 
-                for key in self.padding_obs_zero_keys:
-                    if key not in padding_sample:
-                        raise KeyError(
-                            f"repeat_obs_zero_keys: missing {key!r}"
-                        )
-                    padding_sample[key] = torch.zeros_like(padding_sample[key])
+            #     for key in self.padding_obs_zero_keys:
+            #         if key not in padding_sample:
+            #             raise KeyError(
+            #                 f"repeat_obs_zero_keys: missing {key!r}"
+            #             )
+            #         padding_sample[key] = torch.zeros_like(padding_sample[key])
 
+            padding_sample = self.dataset_config.get_padding_obs_sample(
+                first_sample
+            )
             padding_obs = self.sample_to_obs.get_obs(padding_sample)
 
         # 从最早的历史帧遍历到当前帧
@@ -488,7 +537,7 @@ class Pi0LeRobotDataset(Dataset):
             obs_steps.append(obs_cache[sample_idx])
 
         # [T1, ...]
-        obs = _stack_obs(obs_steps, self.is_img_obs_cur_only)
+        obs = self.dataset_config.stack_temporal_obs(obs_steps, self.dataset_config.is_img_obs_cur_only)
 
         # -------- 未来动作 --------
 

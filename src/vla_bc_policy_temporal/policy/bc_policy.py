@@ -299,5 +299,85 @@ class BCPolicy(pl.LightningModule):
                 "interval": "epoch", "frequency": 1}}
         raise ValueError(f"Unknown lr_schedule_type: {self.lr_schedule_type}")
 
+    ###
+
+    def fast_model_prepared(self) -> bool:
+        return callable(
+            getattr(self, "_fast_forward", None)
+        )
+
+    def compile_fast_model(
+        self,
+        example_obs: Mapping[str, Mapping[str, torch.Tensor]],
+        example_traject: torch.Tensor | None = None,
+        example_masks: Mapping[str, torch.Tensor] | None = None,
+
+        preheat_step: int = 15,
+        use_amp: bool = True,
+        use_compile: bool = True,
+    ):
+        """
+        部署专用初始化。
+        example_* 使用真实推理输入的 shape 和 dtype。
+        """
+        if self.fast_model_prepared():
+            return
+
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is not available")
+
+        device = torch.device("cuda")
+
+        self.to(device).eval()
+        self._fast_amp = use_amp
+
+        # 编译 forward 方法，避免把自身注册为子模块
+        if use_compile:
+            self._fast_forward = torch.compile(
+                self.forward,
+                mode="reduce-overhead"
+            )
+        else:
+            self._fast_forward = self.forward
+
+        # 第一次执行才会触发实际编译
+        try:
+            for _ in range(preheat_step):
+                self.fast_predict_action(example_obs, example_traject, example_masks)
+
+            torch.cuda.synchronize()
+
+        except Exception:
+            # 编译或预热失败，不留下可用状态
+            self._fast_forward = None
+            raise
+
+    @torch.inference_mode()
+    def fast_predict_action(
+        self,
+        # 认为 obs, traject, masks 已经移动到对应的 device 中了
+        obs: Mapping[str, Mapping[str, torch.Tensor]],
+        traject: torch.Tensor | None = None,
+        masks: Mapping[str, torch.Tensor] | None = None
+    ) -> torch.Tensor:
+        if not self.fast_model_prepared():
+            raise RuntimeError(
+                "Call compile_fast_model() first"
+            )
+
+        # 神经网络前向推理使用 AMP
+        with torch.autocast(
+            "cuda",
+            dtype=torch.float16,
+            enabled=self._fast_amp
+        ):
+            action_normalized = self._fast_forward(obs, traject, masks) # type: ignore
+
+        # 在 FP32 中进行动作反归一化
+        action = self.normalizer.denormalize_action(
+            action_normalized.float()
+        )
+
+        return action
 
 BCPolicyModule = BCPolicy

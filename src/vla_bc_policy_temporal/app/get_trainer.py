@@ -9,6 +9,10 @@ def get_trainer(
     name: str,
     max_epochs: int = 50,
 
+    save_every_n_epochs: Optional[int] = 5,
+    # 间隔 epoch 保存时, 仅保存最好的 k 个, -1 保存全部
+    save_top_k: int = 5,
+
     overfit_batches: float = 0.0,
     precision: Optional[str] = None,
 
@@ -39,12 +43,25 @@ def get_trainer(
 
     cb_list = []
 
-    file_name = f"best-epoch-{{epoch:02d}}-acc-{{{monitor_metrics}:.3f}}"
+    # 每 n 个 epoch 保存
+    if save_every_n_epochs is not None:
+        cb_list.append(ModelCheckpoint(
+            filename = f"period-epoch-{{epoch:02d}}-acc-{{{monitor_metrics}:.3f}}",
+            monitor = monitor_metrics, mode = "min",
+            every_n_epochs = save_every_n_epochs,
+            save_top_k = save_top_k,               
+            save_on_train_epoch_end = True,  # 在训练 epoch 结束时保存
+        ))
+    # 总是保存最好与最后一个的 ckpt
     cb_list.append(ModelCheckpoint(
-        filename = file_name,
+        filename = f"best-epoch-{{epoch:02d}}-acc-{{{monitor_metrics}:.3f}}",
         monitor = monitor_metrics, mode = "min",
-        save_last = True
+        save_top_k = 1,
+        every_n_epochs = 1,
+        save_on_train_epoch_end = False,
+        save_last = True,                   # 总是保存最后的 chekcpoint
     ))
+
     cb_list.append(RichProgressBar(
         leave = False
     ))

@@ -24,11 +24,11 @@ def main(
     dm_config = Pi0LeRobotDatasetConfig(
         camera_config_dict = MshabCameraConfig,
         vec_obs_keys = ["qpos", "pi0_state"],
-        observation_horizon = 5,
+        observation_horizon = 3,
         padding_obs_zero_keys = ["pi0_state", ],
 
-        action_horizon = 3,
-        traject_horizon = (4, 5),
+        action_horizon = 1,
+        traject_horizon = (2, 3),
 
         ep_key = "episode_idx",
         frame_key = "frame_idx",
@@ -43,7 +43,7 @@ def main(
         val_ratio = 0.05,
         seed = 42,
 
-        batch_size = 128 if not small_batch_lr else 64,
+        batch_size = 256 if not small_batch_lr else 128,
         num_workers = 64,
     )
     pm = BCPolicy(
@@ -66,8 +66,17 @@ def main(
                 expansion = 2,
                 is_output_proj = False
             ),
-            vec_temproal_encoder_type = "gru",
-            vec_temproal_encoder_kwargs = {"out_dim": 128, "hidden_dim": 256},
+            vec_temproal_encoder_type = "mlp",
+            vec_temproal_encoder_kwargs = dict(
+                out_dim = 256,
+                mlp_type = "res_mlp",
+                mlp_kwargs = dict(
+                    hidden_dim = 256,
+                    num_blocks = 1,
+                    expansion = 2,
+                    is_output_proj = False
+                )
+            ),
             vec_out_feat = None, # 不额外调整尺寸
 
             traj_feat_encoder_type = "res_mlp",
@@ -139,8 +148,9 @@ def main(
     
     trainer = get_trainer(
         exp_name, precision = "32" if not is_fast_train else "bf16-mixed", 
-        max_epochs = 150, patience = None,
-        gradient_clip_val = 2.0
+        max_epochs = 100, patience = None,
+        gradient_clip_val = 2.0,
+        save_every_n_epochs = 5
     )
     trainer.fit(pm, datamodule = dm)
 

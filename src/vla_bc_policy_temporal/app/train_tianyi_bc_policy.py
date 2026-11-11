@@ -2,7 +2,7 @@ import torch
 
 from vla_bc_policy_temporal.dataset.pi0_lerobot_datamodule import Pi0LeRobotDataModule
 from vla_bc_policy_temporal.dataset.pi0_lerobot_dataset import Pi0LeRobotDatasetConfig
-from vla_bc_policy_temporal.dataset.camera_config import TianyiCameraConfig
+from vla_bc_policy_temporal.dataset.camera_config import MshabCameraConfig
 
 from vla_bc_policy_temporal.policy.bc_policy import BCPolicy
 from vla_bc_policy_temporal.app.get_trainer import get_trainer
@@ -22,13 +22,16 @@ def main(
         torch.set_float32_matmul_precision('high')
 
     dm_config = Pi0LeRobotDatasetConfig(
-        camera_config_dict = TianyiCameraConfig,
-        vec_obs_keys = ["qpos", "odom_rel"],
-        observation_horizon = 5,
+        camera_config_dict = MshabCameraConfig,
+        vec_obs_keys = ["qpos", "gripper_openness", "odom_rel"],
+        observation_horizon = 3,
         padding_obs_zero_keys = ["odom_rel", ],
 
-        action_horizon = 3,
-        traject_horizon = (4, 5),
+        action_horizon = 1,
+        traject_horizon = (2, 3),
+
+        ep_key = "episode_idx",
+        frame_key = "frame_idx",
     )
 
     dm = Pi0LeRobotDataModule(
@@ -40,7 +43,7 @@ def main(
         val_ratio = 0.05,
         seed = 42,
 
-        batch_size = 128 if not small_batch_lr else 64,
+        batch_size = 256 if not small_batch_lr else 128,
         num_workers = 64,
     )
     pm = BCPolicy(
@@ -48,13 +51,14 @@ def main(
         extractor_kwargs = dict(
             # Each camera: [image encoder, encoder kwargs, declared encoder output width].
             img_backbone_cfg = {
-                "head": ("resnet", {}, 512)
+                "head": ("resnet", {}, 512),
+                "gripper": ("resnet", {}, 512)
             },
-            img_out_feat = {"head": 128},
-            img_use_key = ["head"],
+            img_out_feat = {"head": 128, "gripper": 128},
+            img_use_key = ["head", "gripper"],
 
             # Input dims and all horizon lengths are inferred from DataModule.
-            vec_use_key = ("qpos", "odom_rel"),
+            vec_use_key = ("qpos", "gripper_openness", "odom_rel"),
             vec_feat_encoder_type = "res_mlp",
             vec_feat_encoder_kwargs = dict(
                 hidden_dim = 128,
@@ -62,8 +66,17 @@ def main(
                 expansion = 2,
                 is_output_proj = False
             ),
-            vec_temproal_encoder_type = "gru",
-            vec_temproal_encoder_kwargs = {"out_dim": 128, "hidden_dim": 256},
+            vec_temproal_encoder_type = "mlp",
+            vec_temproal_encoder_kwargs = dict(
+                out_dim = 256,
+                mlp_type = "res_mlp",
+                mlp_kwargs = dict(
+                    hidden_dim = 256,
+                    num_blocks = 1,
+                    expansion = 2,
+                    is_output_proj = False
+                )
+            ),
             vec_out_feat = None, # 不额外调整尺寸
 
             traj_feat_encoder_type = "res_mlp",
@@ -117,7 +130,7 @@ def main(
         action_method = "minmax",
         traject_method = "standard",
 
-        loss_type = "l1",
+        loss_type = "mse",
         key_metrics = "MAE",
         lr = 3e-4 if not small_batch_lr else 1e-4,
         lr_schedule_type = "warmup_cos",
@@ -130,8 +143,9 @@ def main(
     
     trainer = get_trainer(
         exp_name, precision = "32" if not is_fast_train else "bf16-mixed", 
-        max_epochs = 80, patience = None,
-        gradient_clip_val = 2.0
+        max_epochs = 100, patience = None,
+        gradient_clip_val = 2.0,
+        save_every_n_epochs = 5
     )
     trainer.fit(pm, datamodule = dm)
 

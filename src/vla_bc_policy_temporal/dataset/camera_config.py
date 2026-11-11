@@ -142,8 +142,15 @@ TianyiCameraConfig = dict(
     head = DepthTanhCameraConfig(
         layout = "HWC",
         depth_key = "head_depth",
-        z_near = 0.15,
-        z_far = 1.5,
+        z_near = 0.3,
+        z_far = 1.8,
+        depth_scale = 1000.0
+    ),
+    gripper = DepthTanhCameraConfig(
+        layout = "HWC",
+        depth_key = "gripper_depth",
+        z_near = 0.01,
+        z_far = 1.0,
         depth_scale = 1000.0
     )
 )

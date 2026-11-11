@@ -192,9 +192,32 @@ class Normalizer(nn.Module):
             values[name] = state_dict[lookup]
         module[key] = _StatBuffers(values)
 
+    # def _check_ready(self) -> None:
+    #     if not bool(self.stats_ready.item()):
+    #         raise RuntimeError("Stats not initialized: supply stats_path or load_state_dict")
+
     def _check_ready(self) -> None:
+        # 推理阶段已经验证过，无需重复读取 buffer, 保证模型能够被 compile
+        if getattr(self, "_inference_ready", False):
+            return
+
+        # 训练阶段或尚未初始化的模型，保持原有检查
         if not bool(self.stats_ready.item()):
-            raise RuntimeError("Stats not initialized: supply stats_path or load_state_dict")
+            raise RuntimeError(
+                "Stats not initialized: supply stats_path or load_state_dict"
+            )
+
+    def prepare_for_inference(self) -> None:
+        """在模型加载完成后, compile 前调用一次固化 _check_ready 状态, 防止 stats_ready.item 进入计算图导致 compile 失败"""
+        self._inference_ready = False
+        self._check_ready()
+        self._inference_ready = True
+
+    def invalidate_inference_ready(self) -> None:
+        """重新加载或修改统计量前调用。"""
+        self._inference_ready = False
+
+    ###
 
     def _apply_tensor(self, x: Tensor, buffers: _StatBuffers, method: NormalizeMethod,
                       is_image: bool, inverse: bool) -> Tensor:

@@ -326,8 +326,10 @@ class BCPolicy(pl.LightningModule):
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available")
 
-        device = torch.device("cuda")
+        # 缓存 buffer 加载结果, 防止 _check_ready 进入计算图 
+        self.normalizer.prepare_for_inference()
 
+        device = torch.device("cuda")
         self.to(device).eval()
         self._fast_amp = use_amp
 
@@ -335,7 +337,7 @@ class BCPolicy(pl.LightningModule):
         if use_compile:
             self._fast_forward = torch.compile(
                 self.forward,
-                mode="reduce-overhead"
+                mode = "reduce-overhead"
             )
         else:
             self._fast_forward = self.forward
@@ -368,8 +370,8 @@ class BCPolicy(pl.LightningModule):
         # 神经网络前向推理使用 AMP
         with torch.autocast(
             "cuda",
-            dtype=torch.float16,
-            enabled=self._fast_amp
+            dtype = torch.float16,
+            enabled = self._fast_amp
         ):
             action_normalized = self._fast_forward(obs, traject, masks) # type: ignore
 

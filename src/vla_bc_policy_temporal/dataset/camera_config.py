@@ -103,7 +103,7 @@ class DepthTanhCameraConfig(CameraConfig):
         frame = frame.type(torch.float32) / self.depth_scale
         
         frame = 1 - torch.tanh((frame - self.z_near) / (self.z_far - self.z_near))
-        frame[frame < 0] = 0
+        frame[frame > 1] = 1
 
         return self.standard_frame(frame, is_batched)
 

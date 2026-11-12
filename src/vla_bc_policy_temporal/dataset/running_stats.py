@@ -232,7 +232,7 @@ if __name__ == "__main__":
                 repo_id = repo_id,
                 dataset_config = {
                     "camera_config_dict": to_raw_camera_config_dict(TianyiCameraConfig),
-                    "vec_obs_keys": ["qpos", "odom_rel"],
+                    "vec_obs_keys": ["qpos", "gripper_openness", "odom_rel"],
 
                     "observation_horizon": 1,
                     "action_horizon": 1,

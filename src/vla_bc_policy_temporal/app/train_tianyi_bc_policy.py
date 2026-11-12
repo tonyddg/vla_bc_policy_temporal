@@ -2,7 +2,7 @@ import torch
 
 from vla_bc_policy_temporal.dataset.pi0_lerobot_datamodule import Pi0LeRobotDataModule
 from vla_bc_policy_temporal.dataset.pi0_lerobot_dataset import Pi0LeRobotDatasetConfig
-from vla_bc_policy_temporal.dataset.camera_config import MshabCameraConfig
+from vla_bc_policy_temporal.dataset.camera_config import TianyiCameraConfig
 
 from vla_bc_policy_temporal.policy.bc_policy import BCPolicy
 from vla_bc_policy_temporal.app.get_trainer import get_trainer
@@ -22,7 +22,7 @@ def main(
         torch.set_float32_matmul_precision('high')
 
     dm_config = Pi0LeRobotDatasetConfig(
-        camera_config_dict = MshabCameraConfig,
+        camera_config_dict = TianyiCameraConfig,
         vec_obs_keys = ["qpos", "gripper_openness", "odom_rel"],
         observation_horizon = 3,
         padding_obs_zero_keys = ["odom_rel", ],
